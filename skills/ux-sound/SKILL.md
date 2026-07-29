@@ -1,6 +1,6 @@
 ---
 name: ux-sound
-description: "Decide whether an interface element should make a sound, which kind, how loud, and where the audio comes from (synthesis, recording, or ElevenLabs generation). Use when adding sound to a UI, choosing between synthesizing and sampling, levelling sounds against each other, syncing audio to animation, or auditing an existing sound layer. Triggers on: ui sound, ux sound, sonic ux, audio feedback, micro feedback, earcon, auditory icon, notification sound, alert sound, hover sound, click sound, sound effect, sfx, should this have sound, too loud, sounds cheap, sound doesn't fire, elevenlabs, sound generation."
+description: "Decide whether an interface element should make a sound, which kind, how loud, and where the audio comes from (synthesis, recording, or generation). Also audits an existing UI: inventories every trigger, deletes the decorative ones, re-levels the rest, and finds the playback bugs. Use when adding sound to a UI, auditing or reviewing a UI that already has sound, deciding whether a silent UI needs any, choosing between synthesizing and sampling, levelling sounds against each other, or syncing audio to animation. Triggers on: ui sound, ux sound, sonic ux, audio feedback, micro feedback, earcon, auditory icon, notification sound, alert sound, hover sound, click sound, sound effect, sfx, should this have sound, audit sounds, sound audit, review the sound, too loud, sounds cheap, sound doesn't fire, sound plays twice, sound generation."
 license: MIT
 metadata:
   author: jal-co
@@ -17,6 +17,8 @@ The distinction that organizes everything below:
 - **UI sound** — the specific artifact attached to a specific element. What it is.
 
 Most bad interface audio is a UI sound problem caused by skipping the UX sound question.
+
+**Auditing a UI that already has sound (or has none)? Start at §10**, then come back to §1–§4 for each trigger it finds.
 
 ## 1. Should this element make a sound?
 
@@ -40,7 +42,7 @@ Does the sound carry information the user cannot already see?
 
 **Always** delete decorative sound that survives this tree by accident. A sound that does not inform is a sound the user will turn off, and they cannot turn off yours specifically — they turn off the tab.
 
-**Never** play sound on page load, route change, or scroll. None of those are user-initiated at the moment they occur, and the browser will block them anyway (§6).
+**Never** play sound on page load, route change, or scroll. None of those are user-initiated at the moment they occur, and the browser will block them anyway (§7).
 
 ## 2. Which type
 
@@ -68,128 +70,89 @@ Run the analyzer first:
 Is noise_percent > 80% AND fewer than 4 harmonics?
 ├── Yes → SYNTHESIZE. It is filtered noise; a file adds bytes and buys nothing.
 └── No
-    ├── Does the sound need to last an unknown duration (hover, hold, drag)?
-    │   ├── Yes, and it never changes with UI state
-    │   │   → SYNTHESIZE, or generate with `loop: true` and play it looped.
-    │   └── Yes, and it must react to state (dim as a light dims, tighten
-    │       as a value rises)
-    │       → SYNTHESIZE. A loop is a fixed recording; you cannot modulate
-    │         its level or timbre from the interface without it sounding
-    │         like a fader on a tape.
+    ├── Does the sound sustain (hover, hold, drag, ambient bed)?
+    │   └── Yes → SYNTHESIZE. Always. See "sustained sounds" below.
     └── Is it an auditory icon (claims to be a real object)?
         ├── Yes → RECORD or GENERATE. See the rule below.
         └── No  → SYNTHESIZE.
 ```
 
-**The rule that costs the most time if ignored:** a real recording of a physical object beats a synthesis of it, even a synthesis built from the recording's own measured envelope and spectrum. Physical objects carry instability that survives being described accurately. Budget one attempt at synthesizing an auditory icon; if it loses the A/B against the reference, ship the recording and stop.
+**For one-shot physical events, a real recording beats a synthesis of it** —
+even a synthesis built from the recording's own measured envelope and spectrum.
+Physical objects carry instability that survives being described accurately.
+Budget one attempt at synthesizing an auditory icon; if it loses the A/B against
+the reference, ship the recording and stop.
+
+**The reverse is true for sustained sounds.** A recorded or generated bed loses
+to a synthesized one, and the reason is not realism — it is that you cannot take
+anything out of a recording. See below.
 
 **Never layer synthesized transients on top of a recording of the same event.** The recording already contains them, and every tick doubles.
 
-### Generating with ElevenLabs
+### Sustained sounds are always synthesized
 
-**The user must set `ELEVENLABS_API_KEY` themselves.** The SDK reads it from the
-environment with no arguments. Never hardcode it, never write it into a file,
-never echo it. If it is missing, stop and ask:
+A one-shot is over before the ear can object. A bed plays for as long as someone
+reads the page, and that changes which source wins.
 
-```bash
-[ -n "$ELEVENLABS_API_KEY" ] || echo "Set ELEVENLABS_API_KEY (elevenlabs.io/app/settings/api-keys)"
+**You cannot remove a frequency from a recording, only from a synthesis.** A
+generated hum arrives with whatever the model put in it. If part of that content
+fatigues, your options are a filter that guts the whole sound or a different
+generation that has its own problems. With synthesis you simply never make the
+offending partial.
+
+**Nothing sustained should carry energy in 2–5kHz.** That is where the ear is
+most sensitive, and sensitivity that is a feature for a 12ms click is an injury
+over ninety seconds. Two versions of one hum failed this way before it was fixed:
+
+- three partials at 10.8–11.1kHz, detuned so they beat against each other,
+  which is the worst case because the beating keeps re-drawing attention
+- a generated bed whose crackle sat in the same region
+
+Both were described as "ringing my ears" by the listener. The fix was a 900Hz
+lowpass and nothing above 291Hz.
+
+**Verify it, do not trust the design.** Render offline and measure the share of
+energy above 2kHz. Under 1% for anything that sustains:
+
+```js
+// after rendering the bed through its real chain
+let high = 0, total = 0;
+for (let f = 100; f < 16000; f *= 1.3) {
+  const m = magnitudeAt(f);      // any DFT bin
+  total += m;
+  if (f > 2000) high += m;
+}
+// high / total < 0.01
 ```
 
-Install the official skill; it tracks the API:
+**Generation is for texture, not for placement or for beds.** Across this
+skill's test runs it produced usable crackle and ambience, never a usable
+transient at a chosen moment, and never a bed that could be levelled without
+fatigue.
 
-```bash
-npx skills add elevenlabs/skills --skill sound-effects
-```
+### The GENERATE route (optional)
 
-JavaScript — use `@elevenlabs/*` packages only:
+Generation is one of three routes, not the default, and §3's tree narrows it
+hard: only a **one-shot auditory icon** you cannot record. Never a bed.
 
-```javascript
-import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
-import { createWriteStream } from "fs";
+**Never sign the user up for a paid service to finish a task.** If no generator
+is configured, say so and offer the alternatives: record it (a phone mic and a
+real object beats a generation more often than people expect), pull from a free
+library, or synthesize and accept the loss.
 
-const client = new ElevenLabsClient(); // reads ELEVENLABS_API_KEY
-const audio = await client.textToSoundEffects.convert({
-  text: "single dry mechanical latch click, close mic, no room",
-  duration_seconds: 0.5,
-  prompt_influence: 0.8,
-});
-audio.pipe(createWriteStream("/tmp/candidate.mp3"));
-```
+The three findings that decide whether it works at all:
 
-Python:
+- **Enumerate beats literally, never in milliseconds.** Measured across four
+  prompt styles: only literal enumeration produced structure. "crack, buzz,
+  crack, buzz, steady hum" gave 7 evenly-spread events; "three failed clicks"
+  gave 0.
+- **Anchor with positional words** ("at the very start", "through the middle").
+  Numbers never place anything; these measurably do.
+- **Placement is probabilistic.** The same prompt twice put its peak at 0ms and
+  at 920ms. Generate three, select by measurement.
 
-```python
-from elevenlabs import ElevenLabs
-
-client = ElevenLabs()  # reads ELEVENLABS_API_KEY
-audio = client.text_to_sound_effects.convert(
-    text="single dry mechanical latch click, close mic, no room",
-    duration_seconds=0.5,
-    prompt_influence=0.8,
-)
-with open("/tmp/candidate.mp3", "wb") as f:
-    for chunk in audio:
-        f.write(chunk)
-```
-
-| Param | Range | Set it to |
-|---|---|---|
-| `duration_seconds` | 0.5–30, null = auto | Always set it. Auto picks a length for video, not for a button |
-| `prompt_influence` | 0–1, default 0.3 | **0.8** for UI sound. The default is loose enough to wander off a short, specific brief |
-| `loop` | boolean, v2 only | `true` only for continuous beds (§3 tree) |
-| `output_format` | query param or SDK arg | `mp3_44100_128`. `pcm_44100` is pointless once you trim to 60ms |
-
-Errors: `401` bad key, `422` out-of-range params (check duration and
-prompt_influence), `429` rate limited — back off, do not retry in a loop.
-
-**The 0.5s floor shapes this whole route.** Micro feedback is 10–120ms and the
-API will not go below 500ms. Generation is therefore always two steps: generate,
-then find the transient and cut.
-
-```bash
-scripts/trim-to-transient.sh /tmp/candidate.mp3 public/sfx/click.mp3 0.06
-```
-
-It finds the onset, cuts 4ms before it so the attack is never clipped,
-compresses and limits, and writes mono 44.1kHz. Clipping the attack is what
-turns a click into a thud.
-
-**Never ship the raw generation.** It arrives padded with silence and a room
-tail, at a length chosen for video.
-
-### Prompting for an animated element
-
-If the element animates, the sound and the animation are one event, and the
-prompt is where that starts. Put the storyboard in the text.
-
-```
-Storyboard the beats first:
-  strike → flicker ×3 → settle
-  0ms      90-300ms     by 700ms
-
-Then prompt the structure, not just the object:
-  "fluorescent tube striking on: one sharp electrical crack, then three
-   unstable flickers within the next 300ms, settling to a steady hum by
-   700ms. Close mic, dry, no room."
-
-And set duration_seconds to the animation's total length.
-```
-
-**Always name the beats and their timing in the prompt.** A generator asked for
-"a fluorescent light" returns an unstructured 3-second wash you cannot animate
-to. Asked for the rhythm, it returns something with transients where you need
-them.
-
-**Then invert the authority: once generated, the audio is the source of truth.**
-Measure where the transients actually landed and re-time the animation to them
-(§7). The prompt is how you ask for a shape; the waveform is what you got.
-
-Prompt rules, because generators default to cinematic:
-
-- **Always** name mic distance and room ("close mic, dry, no reverb"). Interface sounds have no room.
-- **Always** say "single" or "one" for micro feedback. Generators love giving you a sequence.
-- **Never** use emotional adjectives ("satisfying", "premium"). Name the object and material: "small metal latch", "thin plastic tab", "paper edge".
-- Generate 3 candidates per prompt and analyze all three. Pick by measurement, not by first impression.
+Full method — API key handling, SDK calls, params, the 0.5s floor, onset
+trimming, and looping beds: **[references/generating.md](references/generating.md)**
 
 ## 4. Levels
 
@@ -210,13 +173,19 @@ Escalation ladder. Each step is a target peak, and the gaps are what make escala
 
 | Level | Class | Target peak |
 |---|---|---|
-| 0 | Continuous (hum, drone, hold) | −40 dBFS |
+| 0 | Continuous (hum, drone, hold) | −40 dBFS or below |
 | 1 | Implicit micro feedback (hover) | −38 dBFS |
 | 1 | Explicit micro feedback (press, send) | −27 dBFS |
 | 2 | Notification | −20 dBFS |
 | 3 | Alert | −12 dBFS |
 
 **Continuous sounds sit below every transient**, because they are present the whole time the user is reading. A drone at the level of a click is unbearable within ten seconds.
+
+**When in doubt on a bed, go quieter than the ladder.** −40 is a ceiling, not a
+target. A hum at −42 sits 26dB under its own trigger sound: audible in a quiet
+room, gone in a noisy one, which is the right way round for a sound nobody asked
+for. Every round of feedback on a continuous sound in practice has been "quieter",
+never "louder".
 
 **A deliberate gesture may sit up to 9dB above the ambient one it accompanies, never more.** Beyond that the two stop reading as the same instrument and the louder one feels like a different app.
 
@@ -229,7 +198,64 @@ Pick one per product and write it down. It resolves every later argument about w
 
 The personality sets the default answer for §1's first branch. A butler product answers "no sound" far more often than a buddy product.
 
-## 6. Implementation rules
+## 6. Accessibility
+
+Sound is the one channel a user may not be able to receive, may have turned
+off at the OS, or may be in a room where using it is antisocial. Assume it is
+missing and design so nothing breaks.
+
+**Every sound has a visual equivalent.** Never let a sound be the only carrier
+of information. Most users will never hear it: muted tabs, headphones out,
+autoplay policy not yet satisfied (§7). If the sound is the only signal that a
+message sent, the message silently did not send for most of your users.
+
+**Ship a mute control, persisted.** Not a settings page — a control the user can
+find in the moment the sound annoys them. Persist it and read it before every
+play, not at load:
+
+```js
+let muted = typeof localStorage !== "undefined" && localStorage.getItem("sfx") === "off";
+
+export function setSfxMuted(next) {
+  muted = next;
+  localStorage.setItem("sfx", next ? "off" : "on");
+  if (next) stopAllContinuous(); // a drone must stop the instant it is muted
+}
+```
+
+**`prefers-reduced-motion: reduce` mutes sound by default.** The query is about
+motion, but the intent is calm, and someone who asked an interface to stop
+moving did not ask it to start talking. When the sound accompanies an animation
+that reduced-motion has already disabled, it has also lost its referent and is
+now a noise with no cause.
+
+```js
+const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (calm && localStorage.getItem("sfx") === null) muted = true;
+```
+
+Read `localStorage` first, so an explicit opt-in still wins.
+
+**Never sound on typing or keyboard navigation.** Both are high-frequency and
+sustained. A sound that fires 90 times a minute stops being feedback and becomes
+a texture the user has to endure.
+
+### The hover exception
+
+Hover sound is decorative by default and the default is no. It is allowed only
+when **every** one of these holds:
+
+- The sound is at or below −35 dBFS peak (§4, level 0-1)
+- It is mouse-only (`pointerType === "mouse"`)
+- It is debounced ≥90ms (§7)
+- It can be muted, and is muted under reduced-motion
+- The element is a signature moment, not a list of twelve
+
+**Write the exception down where the code lives.** Hover sound that nobody
+decided on is the kind that ships, annoys, and never gets attributed to a
+decision, because there wasn't one.
+
+## 7. Implementation rules
 
 These are failure modes, each of which will cost an hour if rediscovered.
 
@@ -263,17 +289,19 @@ Reversed, the first hover (which can only ever start the fetch) also blocks the 
 
 **Re-entry must not stack.** A continuous sound needs a singleton guard (`if (running) return`), or three hovers create three drones.
 
-## 7. Syncing sound to animation
+## 8. Syncing sound to animation
 
 Sound and animation are one event. The authority passes between them in one
 direction, and going the other way costs you the sound.
 
 ```
-1. STORYBOARD    Write the beats and their times before either exists.
-                   strike 0ms → flicker ×3 by 300ms → settle by 700ms
+1. STORYBOARD    Count the beats you need, in order. Not their times —
+                 the generator cannot honour times (§3).
+                   crack → flicker → flicker → flicker → settle
+                   = 5 beats
 
-2. PROMPT        Put that rhythm in the generation prompt (§3), and set
-                 duration_seconds to the total.
+2. PROMPT        Enumerate those beats literally, one comma each, and set
+                 duration_seconds to the event's real length (§3).
 
 3. MEASURE       scripts/transients.mjs clip.mp3 --keyframes
                  Prints each transient as a keyframe percentage of the
@@ -297,7 +325,7 @@ its beats as the storyboard for step 1 and regenerate.
 as a glitch.** Both halves come from the same table of measured times, so keep
 that table in one file and derive both from it.
 
-## 8. Verification
+## 9. Verification
 
 Never claim a sound works without one of these:
 
@@ -307,6 +335,98 @@ Never claim a sound works without one of these:
 - **A/B against the reference.** Build a preview page with both, 400ms apart, before defending a synthesis.
 
 Synthetic `pointerover` events dispatched by test harnesses frequently do not reach React's `onPointerEnter`. Call the handler directly through the element's react props when verifying, or you will chase a bug that does not exist.
+
+## 10. Auditing an existing UI
+
+An audit is a subtraction pass. Assume the layer is too loud and has too many
+sounds, because that is what almost every one of them is. The output is a list
+of deletions first, fixes second, additions last (usually empty).
+
+### Step 1 — inventory every trigger
+
+Read the code before listening to anything. Ears rationalize; a list does not.
+
+```bash
+rg -n "new Audio\(|AudioContext|\.play\(\)|playSound|useSound|howler|<audio" --type-add 'web:*.{ts,tsx,js,jsx,vue,svelte}' -t web
+rg -n --files -g '*.{mp3,wav,ogg,m4a,webm}'
+```
+
+Build one row per **trigger**, not per file. Two components importing the same
+click are two rows, because they can disagree about level and debounce.
+
+| Element | Event | Asset | Type (§2) | Measured peak | Verdict |
+|---|---|---|---|---|---|
+
+If the UI has no sound at all, the inventory is empty and you skip to step 5.
+
+### Step 2 — run every row through §1
+
+For each trigger ask the first branch only: does it carry information the user
+cannot already see? Mark it `DELETE` the moment the answer is no. Do not soften
+this into "lower it" — a decorative sound at −45 dBFS is still a sound the user
+did not ask for.
+
+Expect to delete hover sounds, tab switches, page transitions, and everything
+firing on scroll. These are the four that show up in nearly every layer.
+
+**One signature moment survives the tree without informing.** If two do, the
+second is a deletion; name which one you kept and why.
+
+### Step 3 — measure, do not listen
+
+For each surviving row, get a real number:
+
+```bash
+node scripts/transients.mjs public/sfx/click.mp3
+```
+
+For synthesized sounds, render the real chain through an `OfflineAudioContext`
+and measure the peak (§4). Then check three things:
+
+1. Each peak against the §4 ladder for its class.
+2. **The gaps between classes**, which matter more than the absolute values. If
+   the notification and the alert are within 4dB, escalation is broken and the
+   user cannot tell urgent from routine.
+3. Continuous sounds sit below every transient.
+
+Report as `−31 dBFS, ladder says −27, +4 too quiet`. Never `feels quiet`.
+
+### Step 4 — check the failure modes
+
+Walk §6 against the code. In audit order, most-found first:
+
+1. Clips decoded lazily instead of on the unlock gesture → first play is silent.
+2. Retrigger guard spent before the readiness check → first hover eats the second.
+3. No debounce, or under 90ms → `pointerenter` doubles across child elements.
+4. Hover sounds not gated on `pointerType === "mouse"` → fires on touch taps.
+5. Continuous sounds with no singleton guard or no `disconnect()` → drones stack.
+
+Verify each by the §8 methods. A layer that "seems fine" while clicking around
+is how all five of these survive to production.
+
+### Step 5 — additions, last and few
+
+Only after deletions and fixes. Run candidates through §1 like anything else, and
+hold the total: **most products need three sounds or fewer**. If the audit
+proposes more additions than deletions, the audit is wrong.
+
+For a silent UI, the honest answer is usually "it does not need sound". Say that
+plainly instead of inventing a reason to build a layer.
+
+### Report format
+
+```
+SOUND AUDIT — <product>
+Personality: butler | buddy (inferred, confirm this)
+
+DELETE (n)     element · event · why it fails §1
+FIX (n)        element · symptom · rule from §6 · one-line fix
+RELEVEL (n)    element · measured → target dBFS
+ADD (n)        element · type · route
+```
+
+Lead with the count of deletions. It is the number that tells the user how the
+layer got where it is.
 
 ## Scripts
 
@@ -320,17 +440,32 @@ Both degrade with a message if `ffmpeg` is missing.
 ## Checklist
 
 - [ ] Every sound survives §1's tree; decorative ones deleted
+- [ ] Every sound has a visual equivalent; none is the only signal
+- [ ] Mute control exists, is persisted, and stops continuous sounds instantly
+- [ ] `prefers-reduced-motion` mutes by default; explicit opt-in overrides it
+- [ ] No sound on typing or keyboard navigation
+- [ ] Any hover sound meets all five conditions in §6
 - [ ] Type chosen from §2; implicit and explicit levelled differently
 - [ ] Route chosen by analyzer output, not preference
 - [ ] No synthesized transients layered over a recording of the same event
 - [ ] Levels set by measured dBFS peak against the §4 ladder
 - [ ] Continuous sounds below every transient sound
+- [ ] Sustained sounds are synthesized, not recorded or generated
+- [ ] Sustained sounds measure <1% of their energy above 2kHz
 - [ ] Unlock armed at import; every clip decoded on first gesture
 - [ ] Readiness checked before the retrigger guard is spent
 - [ ] Hover sounds mouse-only; identical sounds debounced ≥90ms
 - [ ] Continuous sounds are singletons and disconnect on stop
-- [ ] `ELEVENLABS_API_KEY` set by the user, never hardcoded
-- [ ] Generation prompt names the beats and their timings, not just the object
+- [ ] Generation only after record/library/synthesize were offered; API key set by the user, never hardcoded
+- [ ] Generation prompt enumerates beats literally (onomatopoeia, one per comma), never milliseconds
 - [ ] Raw generations trimmed to the transient before shipping
 - [ ] Animation keyframes derived from measured audio transients, not the reverse
 - [ ] Playback verified by counting `start()` calls, not by absence of errors
+
+Audit-only:
+
+- [ ] Inventory built from code, one row per trigger, before any listening
+- [ ] Every row run through §1; decorative triggers marked DELETE, not lowered
+- [ ] Levels reported as measured dBFS against the ladder, with the class gaps checked
+- [ ] All five §6 failure modes checked and verified by §8 methods
+- [ ] Additions proposed last, and fewer than deletions

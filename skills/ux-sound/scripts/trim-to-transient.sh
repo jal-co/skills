@@ -31,15 +31,45 @@ if [[ ! -f "$IN" ]]; then
   exit 1
 fi
 
-# First moment the file rises above the noise floor. -45dB catches a
-# quiet tick without triggering on encoder noise.
-ONSET="$(ffmpeg -hide_banner -i "$IN" -af "silencedetect=noise=-45dB:d=0.02" -f null - 2>&1 \
-  | awk '/silence_end/ {print $5; exit}')"
-
-# No detected silence means it starts hot; begin at zero.
-if [[ -z "${ONSET:-}" ]]; then
-  ONSET=0
-  echo "no leading silence detected, cutting from 0" >&2
+# Where does the audio actually start?
+#
+# Two ways to answer, and the cheap one is wrong often enough to
+# matter. silencedetect reports silences below a fixed dB threshold;
+# a generated clip frequently opens with 30-60ms of room tone that
+# is quiet but not "silent", so silencedetect skips it and reports
+# the first real gap instead — which is *after* the transient you
+# want. Cutting there throws away the sound and keeps the decay.
+#
+# The reliable answer is relative to the clip's own peak: the onset
+# is the first sample above 8% of it. That needs to decode the file,
+# so it falls back to silencedetect if node is unavailable.
+if command -v node >/dev/null 2>&1; then
+  RAW="$(mktemp -t trimonset)"
+  trap 'rm -f "$RAW"' EXIT
+  ffmpeg -v error -y -i "$IN" -ac 1 -ar 44100 -f f32le "$RAW"
+  ONSET="$(node -e '
+    const fs = require("fs");
+    const b = fs.readFileSync(process.argv[1]);
+    const d = new Float32Array(b.buffer, b.byteOffset, b.length / 4);
+    let peak = 0;
+    for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+    let onset = 0;
+    for (let i = 0; i < d.length; i++) {
+      if (Math.abs(d[i]) > peak * 0.08) { onset = i; break; }
+    }
+    process.stdout.write((onset / 44100).toFixed(4));
+  ' "$RAW")"
+  echo "onset ${ONSET}s (8% of peak)" >&2
+else
+  SILENCE="$(ffmpeg -hide_banner -i "$IN" -af "silencedetect=noise=-45dB:d=0.02" -f null - 2>&1 || true)"
+  FIRST_START="$(echo "$SILENCE" | awk '/silence_start/ {print $5; exit}')"
+  FIRST_END="$(echo "$SILENCE" | awk '/silence_end/ {print $5; exit}')"
+  if [[ -z "${FIRST_START:-}" ]] || awk -v s="${FIRST_START:-1}" 'BEGIN { exit !(s > 0.01) }'; then
+    ONSET=0
+  else
+    ONSET="${FIRST_END:-0}"
+  fi
+  echo "no node; silencedetect says ${ONSET}s (may miss a quiet head)" >&2
 fi
 
 # Back up 4ms so the attack itself is never clipped. Clipping the
