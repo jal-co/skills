@@ -93,10 +93,19 @@ turns a click into a thud.
 A generated clip usually opens with 30–60ms of room tone that is quiet but not
 silent, so a dB-threshold detector skips it and reports the first real *gap*
 instead — which is after the transient. The onset is the first sample above 8%
-of peak. Measured on one chain-pull generation: silence detection said 0ms and
-kept 35ms of dead head; 8%-of-peak found 34.7ms. `scripts/trim-to-transient.sh`
-does this, and 35ms of inaudible head is 35ms of latency between the pointer and
-the sound.
+of peak.
+
+Measured twice, on unrelated clips:
+
+| Clip | silencedetect said | 8% of peak said |
+|---|---|---|
+| neon strike | 0.30s (kept the decay, dropped the strike) | 0.00s |
+| chain pull | 0.00s (kept 35ms of dead head) | 0.035s |
+
+It failed in both directions, which is the point: the error is not a consistent
+offset you can correct for. `scripts/trim-to-transient.sh` uses the relative
+method, because 35ms of inaudible head is 35ms of latency between the pointer
+and the sound.
 
 **Never ship the raw generation.** It arrives padded with silence and a room
 tail, at a length chosen for video.
@@ -119,6 +128,21 @@ Measured, same object and model, four prompt styles:
 
 Scene language, which every prompting guide recommends, produced a featureless
 wash. Enumeration produced a rhythm.
+
+**Replicated on a different object.** Asking for a lamp pull chain four ways,
+same model, same params:
+
+| Prompt | Peak lands at |
+|---|---|
+| "Pull chain on a light fixture: metal chain rattle, then a hard click, at the very start" | 390ms |
+| (identical, second run) | 350ms |
+| "single pull of a lamp chain switch, chain links rattle, sharp click" | 220ms |
+| **"rattle, click. Pulling the chain switch on a bare light bulb"** | **60ms** |
+
+The version that opens with two onomatopoeic words landed its transient nearly
+six times earlier than the descriptive ones, which buried it mid-clip. Prose
+about a sound gets rendered as ambience; the sound's own name gets rendered as
+an event.
 
 **The structure:**
 
