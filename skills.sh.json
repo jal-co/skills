@@ -1,5 +1,12 @@
 {
   "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
   "notGrouped": "bottom",
-  "groupings": []
+  "groupings": [
+    {
+      "name": "Design",
+      "skills": [
+        "ux-sound"
+      ]
+    }
+  ]
 }
