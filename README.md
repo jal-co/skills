@@ -1,7 +1,7 @@
 # skills
 
-[![Agent Skill](https://shieldcn.dev/badge/agent-skill-spec-000000.svg?variant=branded)](https://agentskills.io)
-[![license](https://shieldcn.dev/badge/license-MIT-22c55e.svg)](LICENSE)
+[![Agent Skill](https://shieldcn.dev/badge/agent-skill-spec-000000.svg?variant=branded?size=xs)](https://agentskills.io)
+[![license](https://shieldcn.dev/badge/license-MIT-22c55e.svg?size=xs)](LICENSE)
 
 > [Agent Skills](https://agentskills.io) by **jal-co**. Badges by [shieldcn.dev](https://shieldcn.dev).
 
